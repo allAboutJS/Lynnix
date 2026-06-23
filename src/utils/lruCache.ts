@@ -13,12 +13,12 @@ export default class LRUCache<K, V> {
 	constructor(private size = 5_000) {}
 
 	set(key: K, value: V) {
-		if (this.cache.size >= this.size) {
-			this.cache.delete(this.cache.keys().next().value as K);
-		}
-
 		if (this.cache.has(key)) {
 			this.cache.delete(key);
+		}
+
+		if (this.cache.size >= this.size) {
+			this.cache.delete(this.cache.keys().next().value as K);
 		}
 
 		this.cache.set(key, value);

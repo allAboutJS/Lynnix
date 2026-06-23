@@ -6,11 +6,29 @@
  * @repository https://github.com/allAboutJS/Lynnix
  * @license MIT
  */
+/**
+ * Parse an incoming request body into a Lynnix-friendly shape.
+ *
+ * Supported content types:
+ * - `application/json`
+ * - `application/x-www-form-urlencoded`
+ * - `multipart/form-data`
+ *
+ * Parsed text values are assigned to `req.body` and uploaded files are assigned
+ * to `req.files`, similar to middleware such as multer/formidable.
+ *
+ * Design goals:
+ * - stream-based parsing for forms/uploads
+ * - bounded in-memory buffering for cross-environment compatibility
+ * - no temporary filesystem dependency, so it works in serverless runtimes too
+ * - dynamic imports for optional peer dependencies like `@fastify/busboy` and `qs`
+ */
 
-import type * as http from "node:http";
 import type {
 	BusboyConstructor,
 	BusboyFileStream,
+	LynnixServerRequest,
+	LynnixServerResponse,
 	ParsedRequestBody,
 	ParsedUploadedFile,
 	ParseReqBodyOptions,
@@ -28,57 +46,62 @@ let bodyParserJsonPromise: Promise<JsonBodyParserMiddlewareFactory> | null =
 let busboyConstructorPromise: Promise<BusboyConstructor> | null = null;
 let qsModulePromise: Promise<QsModule | null> | null = null;
 
-/**
- * Parses the request body based on the content type and returns a parsed request body object.
- *
- * @param req The incoming request object.
- * @param _res The server response object.
- * @param options The options for parsing the request body.
- * @returns The parsed request body object.
- */
 export default async function parseReqBody(
-	req: http.IncomingMessage & {
-		body?: unknown;
-		files?: Record<string, ParsedUploadedFile | ParsedUploadedFile[]>;
-	},
-	_res: http.ServerResponse<http.IncomingMessage>,
+	req: LynnixServerRequest,
+	res: LynnixServerResponse,
 	options: ParseReqBodyOptions = {},
 ): Promise<ParsedRequestBody> {
-	if (!req.method || ["GET", "HEAD"].includes(req.method.toUpperCase())) {
+	const rawReq = req.raw;
+
+	if (!rawReq.method || ["GET", "HEAD"].includes(rawReq.method.toUpperCase())) {
 		const result = { body: {}, files: {} };
 		req.body = result.body;
 		req.files = result.files;
 		return result;
 	}
 
-	const contentType = getHeaderValue(req.headers["content-type"]).toLowerCase();
+	const contentType = getHeaderValue(
+		rawReq.headers["content-type"],
+	).toLowerCase();
 
 	if (!contentType) {
 		const result = { body: {}, files: {} };
 		req.body = result.body;
 		req.files = result.files;
-		return result;
+		return;
 	}
 
 	if (contentType.includes("application/json")) {
-		const result = await parseJsonRequestBody(req, _res, options);
-		req.body = result.body;
-		req.files = result.files;
-		return result;
+		const result = await parseJsonRequestBody(req, res, options);
+
+		if (result) {
+			req.body = result.body as Record<string, unknown>;
+			req.files = result.files;
+		}
+
+		return;
 	}
 
 	if (contentType.includes("application/x-www-form-urlencoded")) {
 		const result = await parseUrlEncodedBody(req, options);
-		req.body = result.body;
-		req.files = result.files;
-		return result;
+
+		if (result) {
+			req.body = result.body as Record<string, unknown>;
+			req.files = result.files;
+		}
+
+		return;
 	}
 
 	if (contentType.includes("multipart/form-data")) {
 		const result = await parseMultipartBody(req, options);
-		req.body = result.body;
-		req.files = result.files;
-		return result;
+
+		if (result) {
+			req.body = result.body as Record<string, unknown>;
+			req.files = result.files;
+		}
+
+		return;
 	}
 
 	const result = { body: {}, files: {} };
@@ -90,23 +113,33 @@ export default async function parseReqBody(
 type JsonBodyParserMiddlewareFactory = (options?: {
 	limit?: number | string;
 }) => (
-	req: http.IncomingMessage & { body?: unknown },
-	res: http.ServerResponse<http.IncomingMessage>,
+	req: LynnixServerRequest["raw"] & { body?: unknown },
+	res: LynnixServerResponse["raw"],
 	next: (error?: unknown) => void,
 ) => void;
 
 async function parseJsonRequestBody(
-	req: http.IncomingMessage & { body?: unknown },
-	res: http.ServerResponse<http.IncomingMessage>,
+	req: LynnixServerRequest,
+	res: LynnixServerResponse,
 	options: ParseReqBodyOptions,
 ): Promise<ParsedRequestBody> {
 	const createJsonParser = await loadJsonBodyParser();
+
+	// Return early if the JSON parser is not available
+	if (!createJsonParser) {
+		console.error(
+			`[Lynnix] Parsing JSON requests requires the optional peer dependency "body-parser"`,
+		);
+		return;
+	}
+
 	const jsonParser = createJsonParser({
 		limit: options.jsonLimit ?? options.bodyLimit ?? DEFAULT_BODY_LIMIT,
 	});
+	const rawReq = req.raw as LynnixServerRequest["raw"] & { body?: unknown };
 
 	await new Promise<void>((resolve, reject) => {
-		jsonParser(req, res, (error?: unknown) => {
+		jsonParser(rawReq, res.raw, (error?: unknown) => {
 			if (error) {
 				reject(normalizeError(error, "Failed to parse JSON request body"));
 				return;
@@ -117,21 +150,30 @@ async function parseJsonRequestBody(
 	});
 
 	return {
-		body: req.body ?? {},
+		body: (rawReq.body ?? {}) as Record<string, unknown> | unknown,
 		files: {},
 	};
 }
 
 async function parseUrlEncodedBody(
-	req: http.IncomingMessage,
+	req: LynnixServerRequest,
 	options: ParseReqBodyOptions,
 ): Promise<ParsedRequestBody> {
 	const Busboy = await loadBusboy();
 	const entries: Array<[string, string]> = [];
+	const rawReq = req.raw;
+
+	// Allow URL-encoded body parsing only if Busboy is available
+	if (!Busboy) {
+		console.error(
+			`[Lynnix] Parsing URL-encoded requests requires the optional peer dependency "@fastify/busboy"`,
+		);
+		return;
+	}
 
 	return new Promise((resolve, reject) => {
 		const busboy = new Busboy({
-			headers: req.headers,
+			headers: rawReq.headers,
 			limits: {
 				fieldNameSize: options.fieldNameSize,
 				fieldSize: options.fieldSize ?? options.bodyLimit ?? DEFAULT_BODY_LIMIT,
@@ -206,25 +248,34 @@ async function parseUrlEncodedBody(
 			}
 		});
 
-		req.pipe(busboy as unknown as NodeJS.WritableStream);
+		rawReq.pipe(busboy as unknown as NodeJS.WritableStream);
 	});
 }
 
 async function parseMultipartBody(
-	req: http.IncomingMessage,
+	req: LynnixServerRequest,
 	options: ParseReqBodyOptions,
 ): Promise<ParsedRequestBody> {
 	const Busboy = await loadBusboy();
+
+	if (!Busboy) {
+		console.error(
+			`[Lynnix] Parsing multipart requests requires the optional peer dependency "@fastify/busboy"`,
+		);
+		return;
+	}
+
 	const body: Record<string, unknown> = {};
 	const files: Record<string, ParsedUploadedFile | ParsedUploadedFile[]> = {};
 	const filePromises: Promise<void>[] = [];
 	const allowedMimeTypes = options.allowedMimeTypes ?? null;
 	const allowMultipleFilesPerField =
 		options.allowMultipleFilesPerField ?? false;
+	const rawReq = req.raw;
 
 	return new Promise((resolve, reject) => {
 		const busboy = new Busboy({
-			headers: req.headers,
+			headers: rawReq.headers,
 			preservePath: options.preservePath ?? false,
 			limits: {
 				fieldNameSize: options.fieldNameSize,
@@ -372,7 +423,7 @@ async function parseMultipartBody(
 				});
 		});
 
-		req.pipe(busboy as unknown as NodeJS.WritableStream);
+		rawReq.pipe(busboy as unknown as NodeJS.WritableStream);
 	});
 }
 
@@ -401,7 +452,7 @@ async function consumeFileStream(
 		});
 
 		stream.on("data", (chunk) => {
-			const buffer = toBuffer(chunk);
+			const buffer = toBuffer(chunk as string | Buffer);
 			size += buffer.length;
 			chunks.push(buffer);
 		});
@@ -472,9 +523,10 @@ async function loadJsonBodyParser() {
 		bodyParserJsonPromise = import("body-parser")
 			.then((mod) => mod.default.json.bind(mod.default))
 			.catch(() => {
-				throw new Error(
-					'Parsing JSON requests requires the optional peer dependency "body-parser"',
+				console.log(
+					`[Lynnix] Parsing JSON requests requires the optional peer dependency "body-parser"`,
 				);
+				return null;
 			});
 	}
 
@@ -486,8 +538,8 @@ async function loadBusboy() {
 		busboyConstructorPromise = import("@fastify/busboy")
 			.then((mod) => mod.default as unknown as BusboyConstructor)
 			.catch(() => {
-				console.error(
-					'[Lynnix] Parsing form requests requires the optional peer dependency "@fastify/busboy"',
+				console.log(
+					`[Lynnix] Parsing form requests requires the optional peer dependency "@fastify/busboy"`,
 				);
 				return null;
 			});
@@ -501,8 +553,8 @@ async function loadQsModule() {
 		qsModulePromise = import("qs")
 			.then((mod) => ({ parse: mod.default.parse.bind(mod.default) }))
 			.catch(() => {
-				console.error(
-					'[Lynnix] Parsing query strings requires the optional peer dependency "qs"',
+				console.log(
+					`[Lynnix] Parsing search queries requires the optional peer dependency "qs"`,
 				);
 				return null;
 			});

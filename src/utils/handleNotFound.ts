@@ -8,53 +8,108 @@
  */
 
 import type Mutor from "mutorjs/server";
-import type { BoundaryKey, LynnixServerResponse, RoutesMap } from "../types.js";
-import type { NotFoundError } from "./error.js";
+import type { RoutesMap } from "../types.js";
+import { HttpError, NotFoundError } from "./error.js";
 import findClosestBoundary from "./findClosestBoundary.js";
-import type LRUCache from "./lruCache.js";
+import { handleHttpError } from "./handleHttpError.js";
+import type LynnixRequest from "./lynnixRequest.js";
+import type LynnixResponse from "./lynnixResponse.js";
+import runMiddlewares from "./runMiddlewares.js";
 
-export function handleNotFound(
-	res: LynnixServerResponse,
-	mutor: Mutor,
-	cache: LRUCache<string, Partial<Record<BoundaryKey, string>>>,
+/**
+ * Handles the not found error by finding the closest boundary and
+ * optionally running middlewares before rendering the not found page.
+ *
+ * @param param0 An object containing the request, response, and other context.
+ * @param shouldRunMiddlewares Specifies whether to run middlewares before rendering the not found page.
+ * @returns
+ */
+export async function handleNotFound(
 	{
-		pathname,
+		req,
+		res,
+		mutor,
 		isHtmxReq,
-		routes,
 		routesMap,
+		routes,
+		pathname,
 		data,
 		error,
-		route,
 	}: {
-		pathname: string;
+		res: LynnixResponse;
+		req: LynnixRequest;
+		mutor: Mutor;
 		isHtmxReq: boolean;
-		routesMap: RoutesMap;
 		routes: string[];
+		routesMap: RoutesMap;
+		pathname: string;
 		data?: unknown;
 		error: NotFoundError;
-		route: string;
 	},
+	shouldRunMiddlewares?: boolean,
 ) {
-	const boundaryKey = isHtmxReq ? "fragmentNotFound" : "notFound";
-	const cacheKey = `${route}:${boundaryKey}`;
+	const boundary = isHtmxReq ? "fragmentNotFound" : "notFound";
+	const nearestNotFound = findClosestBoundary(
+		pathname,
+		boundary,
+		routes,
+		routesMap,
+	);
 
-	const nearestNotFound =
-		cache.get(cacheKey) ??
-		findClosestBoundary(pathname, boundaryKey, routes, routesMap);
+	// Run middlewares optionally
+	if (shouldRunMiddlewares) {
+		try {
+			await runMiddlewares(
+				req,
+				res,
+				nearestNotFound?.accessedRoute || "/",
+				routesMap,
+			);
+		} catch (err) {
+			if (err instanceof NotFoundError) {
+				await handleNotFound({
+					req,
+					res,
+					mutor,
+					isHtmxReq,
+					routesMap,
+					routes,
+					pathname,
+					data,
+					error: err,
+				});
 
-	if (!nearestNotFound?.[boundaryKey]) {
-		res.status(404).end();
+				return;
+			}
+
+			handleHttpError({
+				res,
+				mutor,
+				isHtmxReq,
+				routesMap,
+				routes,
+				pathname,
+				data,
+				code: 500,
+				error: err instanceof HttpError ? err : new HttpError(500, err),
+			});
+
+			return;
+		}
+	}
+
+	if (res.raw.writableEnded) {
 		return;
 	}
 
-	if (!cache.has(cacheKey)) {
-		cache.set(cacheKey, nearestNotFound);
+	if (!nearestNotFound?.paths?.[boundary]) {
+		return res.status(404).html("");
 	}
 
-	const html = mutor.renderFile(nearestNotFound[boundaryKey], {
-		path: pathname,
+	const html = mutor.renderFile(nearestNotFound.paths[boundary], {
+		error,
 		data: data || {},
-		error: error,
+		pathname,
 	});
 
 	res.status(404).html(html);

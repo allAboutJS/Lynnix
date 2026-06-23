@@ -14,17 +14,21 @@
  * @returns The sorted array of routes.
  */
 export function sortRoutes(routes: string[]) {
+	const isCatchAll = (route: string) => /\[\[.*\]\]/.test(route);
+	const isDynamic = (route: string) => /\[.*\]/.test(route);
+
 	return routes.sort((a, b) => {
-		const aDynamic = /\[.+\]/.test(a);
-		const bDynamic = /\[.+\]/.test(b);
+		const aCatchAll = isCatchAll(a);
+		const bCatchAll = isCatchAll(b);
 
-		if (!aDynamic && bDynamic) {
-			return -1;
-		}
+		if (aCatchAll && !bCatchAll) return 1;
+		if (!aCatchAll && bCatchAll) return -1;
 
-		if (aDynamic && !bDynamic) {
-			return 1;
-		}
+		const aDynamic = isDynamic(a);
+		const bDynamic = isDynamic(b);
+
+		if (!aDynamic && bDynamic) return -1;
+		if (aDynamic && !bDynamic) return 1;
 
 		return 0;
 	});

@@ -19,7 +19,8 @@ export type {
 	ParsedRequestBody,
 	QsModule,
 } from "./types.js";
-export type { HttpError, NotFoundError } from "./utils/error.js";
+
+export { HttpError, NotFoundError } from "./utils/error.js";
 export { createLynnixApp };
 
 export default createLynnixApp;

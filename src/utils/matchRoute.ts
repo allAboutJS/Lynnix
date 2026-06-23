@@ -27,13 +27,23 @@ export default function matchRoute(path: string, routes: string[]) {
 		const routeChunks = route.split("/").filter(Boolean);
 		let isMatch = true;
 
-		if (pathChunks.length !== routeChunks.length) {
+		const isCatchAll = routeChunks.some((chunk) => /^\[\[.+\]\]$/.test(chunk));
+
+		if (!isCatchAll && pathChunks.length !== routeChunks.length) {
 			continue;
 		}
 
 		for (let j = 0; j < routeChunks.length; j++) {
 			const routeChunk = routeChunks[j];
 			const pathChunk = pathChunks[j];
+
+			if (/^\[\[.+\]\]$/.test(routeChunk)) {
+				params[routeChunk.slice(2, -2)] = pathChunks
+					.slice(j)
+					.map(decodeURIComponent)
+					.join("/");
+				return { params, route };
+			}
 
 			if (/^\[.+\]$/.test(routeChunk)) {
 				params[routeChunk.slice(1, -1)] = decodeURIComponent(pathChunk);
@@ -47,8 +57,7 @@ export default function matchRoute(path: string, routes: string[]) {
 		}
 
 		if (isMatch) {
-			const match = { params, route };
-			return match;
+			return { params, route };
 		}
 	}
 

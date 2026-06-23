@@ -15,12 +15,11 @@ export default function findClosestBoundary(
 	key: BoundaryKey,
 	routes: string[],
 	routesMap: RoutesMap,
-	step = 0,
-) {
+): { paths: RoutesMap[string]; accessedRoute: string } | null {
 	// Find the boundary at the root level if it exists
 	if (path === "/") {
 		const routeEntry = routesMap["/"];
-		return routeEntry?.[key] ? routeEntry : null;
+		return routeEntry?.[key] ? { paths: routeEntry, accessedRoute: "/" } : null;
 	}
 
 	const match = matchRoute(path, routes);
@@ -28,13 +27,10 @@ export default function findClosestBoundary(
 	if (match) {
 		const matchedBoundary = routesMap[match.route][key];
 
-		if (/\[.*\]$/.test(match.route)) {
-			// Match dynamic routes only if exact match
-			if (step === 0 && matchedBoundary) {
-				return routesMap[match.route];
-			}
-		} else if (matchedBoundary) {
-			return routesMap[match.route];
+		// Routes are pre-sorted (static before dynamic at equal depth), so matchRoute
+		// will never return a dynamic sibling over a static match.
+		if (matchedBoundary) {
+			return { paths: routesMap[match.route], accessedRoute: match.route };
 		}
 	}
 
@@ -47,6 +43,5 @@ export default function findClosestBoundary(
 		key,
 		routes,
 		routesMap,
-		step + 1,
 	);
 }

@@ -23,7 +23,7 @@ export default function getMiddlewareChain(
 	chain: string[] = [],
 ) {
 	if (route === "/") {
-		if (routesMap[route].middleware) {
+		if (routesMap[route]?.middleware) {
 			chain.unshift(routesMap[route].middleware);
 		}
 

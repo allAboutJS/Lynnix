@@ -42,11 +42,12 @@ export type LynnixUploadedFiles = Record<
 	ParsedUploadedFile | ParsedUploadedFile[]
 >;
 
-export interface LynnixServerResponse
-	extends http.ServerResponse<http.IncomingMessage> {
+export interface LynnixServerResponse {
+	raw: http.ServerResponse<http.IncomingMessage>;
 	setCookie(name: string, value: string, options: CookieOptions): void;
 	cookies: Cookies;
 	deleteCookie(name: string): void;
+	end(value?: unknown): void;
 	redirect(url: string, permanent?: boolean): void;
 	html(content: string): void;
 	json(content: unknown): void;
@@ -85,7 +86,8 @@ export interface LynnixServerResponse
 	): void;
 }
 
-export interface LynnixServerRequest extends http.IncomingMessage {
+export interface LynnixServerRequest {
+	raw: http.IncomingMessage;
 	body: Record<string, unknown>;
 	files: LynnixUploadedFiles;
 	cookies: Cookies;

@@ -9,6 +9,7 @@
 
 import type * as http from "node:http";
 import type { Cookies, LynnixServerRequest } from "../types.js";
+import LynnixRequest from "./lynnixRequest.js";
 
 let cookieParserPromise: Promise<((input: string) => Cookies) | null> | null =
 	null;
@@ -17,7 +18,7 @@ let qsParserPromise: Promise<
 > | null = null;
 
 export default async function augmentRequest(req: http.IncomingMessage) {
-	const augmentedRequest = req as LynnixServerRequest;
+	const augmentedRequest = new LynnixRequest(req);
 	const baseUrl = `http://${req.headers.host ?? "localhost"}`;
 	const cookieParser = await loadCookieParser();
 
@@ -31,8 +32,8 @@ export default async function augmentRequest(req: http.IncomingMessage) {
 	augmentedRequest.query = await parseQueryString(
 		new URL(req.url ?? "", baseUrl).search.slice(1),
 	);
-	augmentedRequest.body ??= {};
-	augmentedRequest.files ??= {};
+	augmentedRequest.body = {};
+	augmentedRequest.files = {};
 
 	return augmentedRequest;
 }

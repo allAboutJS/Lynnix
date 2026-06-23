@@ -10,22 +10,18 @@
 import type * as http from "node:http";
 import { pathToFileURL } from "node:url";
 import Mutor, { type PartialMutorConfig } from "mutorjs/server";
-import type {
-	BoundaryKey,
-	LynnixServerResponse,
-	ParseReqBodyOptions,
-} from "./types.js";
+import type { ParseReqBodyOptions } from "./types.js";
 import augmentRequest from "./utils/augmentRequest.js";
 import augmentResponse from "./utils/augmentResponse.js";
 import buildRoutes from "./utils/buildRoutesMap.js";
 import { HttpError, NotFoundError } from "./utils/error.js";
 import findClosestBoundary from "./utils/findClosestBoundary.js";
-import getMiddlewareChain from "./utils/getMiddlewareChain.js";
 import { handleHttpError } from "./utils/handleHttpError.js";
 import { handleNotFound } from "./utils/handleNotFound.js";
 import LRUCache from "./utils/lruCache.js";
 import matchRoute from "./utils/matchRoute.js";
 import parseReqBody from "./utils/parseReqBody.js";
+import runMiddlewares from "./utils/runMiddlewares.js";
 import { sortRoutes } from "./utils/sortRoutes.js";
 
 /**
@@ -70,11 +66,6 @@ export default async function createLynnixApp(
 		throw new Error("path must be a string");
 	}
 
-	const BOUNDARY_CACHE = new LRUCache<
-		string,
-		Partial<Record<BoundaryKey, string>>
-	>();
-
 	const MATCHED_ROUTES_CACHE = new LRUCache<
 		string,
 		{ params: Record<string, string>; route: string }
@@ -87,90 +78,96 @@ export default async function createLynnixApp(
 	// Add layouts from the root directory
 	await mutor.addLayoutsInDir(path);
 
-	return async (_req: http.IncomingMessage, _res: LynnixServerResponse) => {
+	return async (
+		_req: http.IncomingMessage,
+		_res: http.ServerResponse<http.IncomingMessage>,
+	) => {
 		const isHtmxReq = _req.headers["hx-request"] === "true";
 
-		// Augment the request and response objects
 		const req = await augmentRequest(_req);
 		const res = await augmentResponse(_res, isHtmxReq);
 
-		const { url } = req;
+		const { url } = req.raw;
+		const method = req.raw.method?.toUpperCase() ?? "GET";
+
 		if (!url) {
-			return res.end();
+			return res.raw.end();
 		}
 
 		const { pathname } = new URL(
 			url,
-			`http://${req.headers.host ?? "localhost"}`,
+			`http://${req.raw.headers.host ?? "localhost"}`,
 		);
 
 		const match =
 			MATCHED_ROUTES_CACHE.get(pathname) ?? matchRoute(pathname, sortedRoutes);
 
 		if (!match) {
-			handleNotFound(res, mutor, BOUNDARY_CACHE, {
-				pathname,
-				isHtmxReq,
-				routesMap,
-				routes: sortedRoutes,
-				error: new NotFoundError(),
-				route: "/", // Default to root since no routes match the path
-			});
+			await handleNotFound(
+				{
+					req,
+					res,
+					mutor,
+					isHtmxReq,
+					routes: sortedRoutes,
+					routesMap,
+					pathname,
+					error: new NotFoundError(),
+				},
+				true, // Run the middleware stack
+			);
 			return;
 		}
 
-		// Will be populated by the loader
 		let data: unknown;
 
 		try {
-			req.params = match?.params ?? {};
+			req.params = match.params;
 			await parseReqBody(req, res, bodyParserOptions);
 
-			// Cache the match to avoid recomputing it on subsequent requests
 			if (!MATCHED_ROUTES_CACHE.has(pathname)) {
 				MATCHED_ROUTES_CACHE.set(pathname, match);
 			}
 
-			const middlewareChain = getMiddlewareChain(match.route, routesMap);
-			const loaderPath = routesMap[match.route].loader;
+			await runMiddlewares(req, res, match.route, routesMap);
 
-			for (let i = 0; i < middlewareChain.length; i++) {
-				const middlewarePath = middlewareChain[i];
-				const mod = await import(pathToFileURL(middlewarePath).href);
-
-				if (typeof mod?.default !== "function") {
-					continue;
-				}
-
-				await mod.default(req, res);
-
-				if (res.writableEnded) {
-					return;
-				}
+			// If the response has already been ended, skip the loader and return early
+			if (res.raw.writableEnded) {
+				return;
 			}
+
+			const loaderPath = routesMap[match.route].loader;
 
 			if (loaderPath) {
 				const mod = await import(pathToFileURL(loaderPath).href);
-				const method = req.method?.toUpperCase() ?? "GET";
 				const handler = mod[method];
 
 				if (typeof handler !== "function") {
-					// Stop non GET requests from completing without a loader for the request
 					if (method !== "GET") {
-						res.status(405).end();
+						res.status(405);
+						res.raw.end();
 						return;
 					}
 				} else {
 					data = await handler(req, res);
 				}
 
-				if (res.writableEnded) {
+				if (res.raw.writableEnded) {
+					return;
+				}
+			} else {
+				// Return 405 for non-GET requests if no loader is found
+				if (method !== "GET") {
+					res.status(405);
+					res.raw.end();
 					return;
 				}
 			}
 		} catch (err) {
 			if (err instanceof HttpError) {
-				handleHttpError(res, mutor, BOUNDARY_CACHE, {
+				handleHttpError({
+					res,
+					mutor,
 					isHtmxReq,
 					pathname,
 					routesMap,
@@ -178,42 +175,42 @@ export default async function createLynnixApp(
 					data: err.meta,
 					code: err.code,
 					error: err,
-					route: match.route,
 				});
 
 				return;
 			}
 
 			if (err instanceof NotFoundError) {
-				handleNotFound(res, mutor, BOUNDARY_CACHE, {
+				handleNotFound({
+					res,
+					req,
+					mutor,
 					isHtmxReq,
 					pathname,
 					routesMap,
 					routes: sortedRoutes,
 					data: err.meta,
 					error: err,
-					route: match.route,
 				});
 
 				return;
 			}
 
 			const boundaryKey = isHtmxReq ? "fragmentError" : "error";
-			const nearestError =
-				BOUNDARY_CACHE.get(`${match.route}:${boundaryKey}`) ??
-				findClosestBoundary(pathname, boundaryKey, sortedRoutes, routesMap);
+			const nearestError = findClosestBoundary(
+				pathname,
+				boundaryKey,
+				sortedRoutes,
+				routesMap,
+			);
 
-			if (!nearestError?.error) {
-				res.status(500).end();
+			if (!nearestError?.paths?.[boundaryKey]) {
+				res.status(500);
+				res.raw.end();
 				return;
 			}
 
-			// Cache the nearest error to avoid recomputing it on subsequent requests
-			if (!BOUNDARY_CACHE.has(`${match.route}:${boundaryKey}`)) {
-				BOUNDARY_CACHE.set(`${match.route}:${boundaryKey}`, nearestError);
-			}
-
-			const html = mutor.renderFile(nearestError[boundaryKey], {
+			const html = mutor.renderFile(nearestError.paths[boundaryKey], {
 				error: err,
 				pathname,
 			});
@@ -222,17 +219,12 @@ export default async function createLynnixApp(
 			return;
 		}
 
-		// ALL MIDDLEWARE AND LOADER RAN SUCCESSFULLY
-		// RENDER THE RESPONSE
-
 		if (isHtmxReq) {
 			const fragmentPath = routesMap[match.route].fragment;
 
 			if (!fragmentPath) {
-				res.status(200).end();
-				console.log(
-					`[Lynnix] No fragment.html was provided for the route ${match.route}`,
-				);
+				res.status(200);
+				res.raw.end();
 				return;
 			}
 
@@ -249,10 +241,7 @@ export default async function createLynnixApp(
 		const pagePath = routesMap[match.route].page;
 
 		if (!pagePath) {
-			res.end();
-			console.log(
-				`[Lynnix] No page.html was provided for the route ${match.route}`,
-			);
+			res.raw.end();
 			return;
 		}
 
