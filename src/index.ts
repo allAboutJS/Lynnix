@@ -8,6 +8,8 @@
  */
 
 import createLynnixApp from "./lynnix.js";
+import type LynnixRequest from "./utils/lynnixRequest.js";
+import type LynnixResponse from "./utils/lynnixResponse.js";
 
 export type { MutorConfig, PartialMutorConfig } from "mutorjs/server";
 export type {
@@ -21,6 +23,6 @@ export type {
 } from "./types.js";
 
 export { HttpError, NotFoundError } from "./utils/error.js";
-export { createLynnixApp };
+export { createLynnixApp, type LynnixRequest, type LynnixResponse };
 
 export default createLynnixApp;
