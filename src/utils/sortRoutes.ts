@@ -16,20 +16,38 @@
 export function sortRoutes(routes: string[]) {
 	const isCatchAll = (route: string) => /\[\[.*\]\]/.test(route);
 	const isDynamic = (route: string) => /\[.*\]/.test(route);
+	const depth = (route: string) => route.split("/").filter(Boolean).length;
+	const staticCount = (route: string) =>
+		route.split("/").filter((seg) => seg && !/^\[/.test(seg)).length;
 
 	return routes.sort((a, b) => {
 		const aCatchAll = isCatchAll(a);
 		const bCatchAll = isCatchAll(b);
 
-		if (aCatchAll && !bCatchAll) return 1;
-		if (!aCatchAll && bCatchAll) return -1;
+		if (aCatchAll !== bCatchAll) {
+			return aCatchAll ? 1 : -1;
+		}
 
 		const aDynamic = isDynamic(a);
 		const bDynamic = isDynamic(b);
 
-		if (!aDynamic && bDynamic) return -1;
-		if (aDynamic && !bDynamic) return 1;
+		if (aDynamic !== bDynamic) {
+			return aDynamic ? 1 : -1;
+		}
 
-		return 0;
+		// Within catch-all tier: deeper prefix is more specific, wins
+		if (aCatchAll) {
+			return depth(b) - depth(a);
+		}
+
+		// Within static/dynamic tier: more static segments = more specific, wins
+		const staticDiff = staticCount(b) - staticCount(a);
+
+		if (staticDiff !== 0) {
+			return staticDiff;
+		}
+
+		// Same static segment count: shallower wins
+		return depth(a) - depth(b);
 	});
 }
