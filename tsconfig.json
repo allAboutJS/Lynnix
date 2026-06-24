@@ -7,7 +7,13 @@
 		"skipLibCheck": true,
 		"strict": false,
 		"isolatedModules": true,
-		"types": ["node"]
+		"types": ["node"],
+		"outDir": "dist",
+		"rootDir": "src",
+		"declaration": true,
+		"declarationMap": true,
+		"sourceMap": true
 	},
-	"include": ["src/**/*.ts"]
+	"include": ["src/**/*.ts"],
+	"exclude": ["node_modules", "dist"]
 }

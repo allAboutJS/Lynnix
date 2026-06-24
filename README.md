@@ -28,7 +28,7 @@ htmx is a breath of fresh air — it brings back the simplicity of server-render
 
 Lynnix gives htmx applications the structure they deserve. It handles the routing and rendering layer so you can focus on what actually matters: building your product.
 
-It's built on [Mutor.js](https://github.com/allAboutJS/Mutor) — a fast, TypeScript-native, zero-dependency template engine — so your templates are expressive, secure, and compiled for performance.
+It's built on [Mutor.js](https://github.com/allAboutJS/Mutor.js) — a fast, TypeScript-native, zero-dependency template engine — so your templates are expressive, secure, and compiled for performance.
 
 ---
 
@@ -216,7 +216,28 @@ export function GET(req) {
 }
 ```
 
-**Route priority:** Static routes always win. Dynamic `[slug]` routes come next. Catch-all `[[slug]]` routes are the last resort.
+### Route Priority
+
+When multiple routes could match the same path, Lynnix resolves the conflict by **specificity** — the more concrete a route is, the higher its priority. Specificity is determined by three factors in order:
+
+**1. Tier** — Static routes always beat dynamic routes, which always beat catch-all routes.
+
+**2. Static segment count** — Within the same tier, routes with more concrete (non-dynamic) segments win. `/posts/featured` has two static segments and beats `/posts/[slug]` which has one. `/[category]/featured` has one static segment and beats `/[category]/[slug]` which has none.
+
+**3. Depth** — When two routes in the same tier have the same number of static segments, shallower routes win for static and dynamic routes (less ambiguous), while deeper routes win for catch-all routes (a more constrained prefix is more specific).
+
+A few examples to make it concrete:
+
+| Path | Matches |
+|---|---|
+| `/posts/featured` | `/posts/featured` — static wins |
+| `/posts/hello-world` | `/posts/[slug]` — dynamic picks it up |
+| `/electronics/featured` | `/[category]/featured` — more static segments wins |
+| `/electronics/some-product` | `/[category]/[slug]` — falls through to two-dynamic route |
+| `/posts/a/b/c` | `/posts/[[slug]]` — deeper catch-all prefix beats shallower |
+| `/anything/goes/here` | `/[[slug]]` — root catch-all is the last resort |
+
+You never have to think about this ordering explicitly — Lynnix sorts your routes at startup so the right one always wins.
 
 ---
 

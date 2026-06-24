@@ -2,7 +2,23 @@
 	"name": "lynnix",
 	"version": "0.0.1",
 	"description": "File-based hypermedia routing middleware for Node.js and HTMX",
-	"main": "src/index.ts",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"import": "./dist/index.js",
+			"types": "./dist/types.d.ts"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"build": "tsc",
+		"prepublishOnly": "npm run build"
+	},
 	"repository": "https://github.com/allaboutjs/lynnix",
 	"author": "Onah Victor",
 	"license": "MIT",
@@ -12,11 +28,15 @@
 		"mutorjs": "^3.0.2"
 	},
 	"peerDependencies": {
+		"@fastify/busboy": "^3.2.0",
 		"body-parser": "^2.3.0",
-		"qs": "^6.15.2",
-		"@fastify/busboy": "^3.2.0"
+		"cookie": "^1.1.1",
+		"qs": "^6.15.2"
 	},
 	"peerDependenciesMeta": {
+		"@fastify/busboy": {
+			"optional": true
+		},
 		"body-parser": {
 			"optional": true
 		},
@@ -25,19 +45,24 @@
 		},
 		"qs": {
 			"optional": true
-		},
-		"@fastify/busboy": {
-			"optional": true
 		}
 	},
 	"devDependencies": {
 		"@types/body-parser": "^1.19.6",
-		"@types/formidable": "^3.5.1",
 		"@types/node": "^25.9.3",
 		"@types/qs": "^6.15.1",
 		"tsx": "^4.22.4"
 	},
 	"allowScripts": {
 		"esbuild@0.28.1": true
-	}
+	},
+	"keywords": [
+		"htmx",
+		"hypermedia",
+		"routing",
+		"ssr",
+		"file-based",
+		"mutor",
+		"node"
+	]
 }
