@@ -1,6 +1,6 @@
 {
 	"name": "lynnix",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"description": "File-based hypermedia routing middleware for Node.js and HTMX",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
