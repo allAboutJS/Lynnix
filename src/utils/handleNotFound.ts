@@ -102,6 +102,12 @@ export async function handleNotFound(
 		return;
 	}
 
+	// Prevent caching for HTMX requests
+	if (isHtmxReq) {
+		res.raw.setHeader("Vary", "HX-Request");
+		res.raw.setHeader("Cache-Control", "no-store");
+	}
+
 	if (!nearestNotFound?.paths?.[boundary]) {
 		return res.status(404).html("");
 	}

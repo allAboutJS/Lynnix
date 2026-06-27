@@ -204,6 +204,12 @@ export default async function createLynnixApp(
 				routesMap,
 			);
 
+			// Prevent caching for HTMX requests
+			if (isHtmxReq) {
+				res.raw.setHeader("Vary", "HX-Request");
+				res.raw.setHeader("Cache-Control", "no-store");
+			}
+
 			if (!nearestError?.paths?.[boundaryKey]) {
 				res.status(500);
 				res.raw.end();
@@ -218,6 +224,8 @@ export default async function createLynnixApp(
 			res.status(500).html(html);
 			return;
 		}
+
+		//******** Loaders and Middleware ran successully up to this point ********
 
 		if (isHtmxReq) {
 			const fragmentPath = routesMap[match.route].fragment;
@@ -234,6 +242,9 @@ export default async function createLynnixApp(
 				url: pathname,
 			});
 
+			// Prevent caching of fragments
+			res.raw.setHeader("Cache-Control", "no-store");
+			res.raw.setHeader("Vary", "HX-Request");
 			res.status(200).html(html);
 			return;
 		}
