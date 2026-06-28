@@ -102,21 +102,17 @@ export async function handleNotFound(
 		return;
 	}
 
-	// Prevent caching for HTMX requests
-	if (isHtmxReq) {
-		res.raw.setHeader("Vary", "HX-Request");
-		res.raw.setHeader("Cache-Control", "no-store");
-	}
-
 	if (!nearestNotFound?.paths?.[boundary]) {
-		return res.status(404).html("");
+		// Always return a 200 status for HTMX requests
+		return res.status(isHtmxReq ? 200 : 404).html("");
 	}
 
 	const html = mutor.renderFile(nearestNotFound.paths[boundary], {
 		error,
 		data: data || {},
-		pathname,
+		url: pathname,
 	});
 
-	res.status(404).html(html);
+	// Always return a 200 status for HTMX requests
+	res.status(isHtmxReq ? 200 : 404).html(html);
 }

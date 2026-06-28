@@ -25,6 +25,12 @@ export default async function augmentResponse(
 	const cookieModule = await loadCookieModule();
 	const responseCookies = readResponseCookies(res, cookieModule);
 
+	// Prevent caching for HTMX requests
+	if (isHtmx) {
+		res.setHeader("Vary", "HX-Request");
+		res.setHeader("Cache-Control", "no-store");
+	}
+
 	return new LynnixResponse(res, isHtmx, cookieModule, responseCookies);
 }
 

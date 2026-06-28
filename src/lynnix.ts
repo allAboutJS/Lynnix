@@ -99,35 +99,38 @@ export default async function createLynnixApp(
 			`http://${req.raw.headers.host ?? "localhost"}`,
 		);
 
-		const match =
-			MATCHED_ROUTES_CACHE.get(pathname) ?? matchRoute(pathname, sortedRoutes);
+		let match = MATCHED_ROUTES_CACHE.get(pathname);
 
 		if (!match) {
-			await handleNotFound(
-				{
-					req,
-					res,
-					mutor,
-					isHtmxReq,
-					routes: sortedRoutes,
-					routesMap,
-					pathname,
-					error: new NotFoundError(),
-				},
-				true, // Run the middleware stack
-			);
-			return;
-		}
+			match = matchRoute(pathname, sortedRoutes);
 
-		let data: unknown;
-
-		try {
-			req.params = match.params;
-			await parseReqBody(req, res, bodyParserOptions);
-
-			if (!MATCHED_ROUTES_CACHE.has(pathname)) {
+			if (match) {
 				MATCHED_ROUTES_CACHE.set(pathname, match);
 			}
+		}
+
+		try {
+			if (!match) {
+				await handleNotFound(
+					{
+						req,
+						res,
+						mutor,
+						isHtmxReq,
+						routes: sortedRoutes,
+						routesMap,
+						pathname,
+						error: new NotFoundError(),
+					},
+					true, // Run the middleware stack
+				);
+				return;
+			}
+
+			let data: unknown;
+
+			req.params = match.params;
+			await parseReqBody(req, res, bodyParserOptions);
 
 			await runMiddlewares(req, res, match.route, routesMap);
 
@@ -142,14 +145,18 @@ export default async function createLynnixApp(
 				const mod = await import(pathToFileURL(loaderPath).href);
 				const handler = mod[method];
 
-				if (typeof handler !== "function") {
-					if (method !== "GET") {
-						res.status(405);
-						res.raw.end();
-						return;
-					}
-				} else {
+				if (typeof handler === "function") {
 					data = await handler(req, res);
+				} else {
+					if (method !== "GET") {
+						if (process.env.NODE_ENV !== "production") {
+							console.error(
+								`[Lynnix] No ${method} handler found for the route '${match.route}'`,
+							);
+						}
+
+						throw new HttpError(405);
+					}
 				}
 
 				if (res.raw.writableEnded) {
@@ -158,11 +165,52 @@ export default async function createLynnixApp(
 			} else {
 				// Return 405 for non-GET requests if no loader is found
 				if (method !== "GET") {
-					res.status(405);
-					res.raw.end();
-					return;
+					if (process.env.NODE_ENV !== "production") {
+						console.error(
+							`[Lynnix] No loader found to handle ${method} requests for the route '${match.route}'`,
+						);
+					}
+
+					throw new HttpError(405);
 				}
 			}
+
+			// Loaders and middleware completed successfully.
+
+			if (isHtmxReq) {
+				const fragmentPath = routesMap[match.route].fragment;
+
+				if (!fragmentPath) {
+					// Log a warning in non-production mode
+					if (process.env.NODE_ENV !== "production") {
+						console.warn(
+							`[Lynnix] No fragment.html found for the route '${match.route}'`,
+						);
+					}
+
+					return res.status(200).html("");
+				}
+
+				const html = mutor.renderFile(fragmentPath, {
+					data,
+					url: pathname,
+				});
+
+				return res.status(200).html(html);
+			}
+
+			const pagePath = routesMap[match.route].page;
+
+			if (!pagePath) {
+				throw new NotFoundError();
+			}
+
+			const html = mutor.renderFile(pagePath, {
+				data,
+				url: pathname,
+			});
+
+			res.status(200).html(html);
 		} catch (err) {
 			if (err instanceof HttpError) {
 				handleHttpError({
@@ -204,63 +252,17 @@ export default async function createLynnixApp(
 				routesMap,
 			);
 
-			// Prevent caching for HTMX requests
-			if (isHtmxReq) {
-				res.raw.setHeader("Vary", "HX-Request");
-				res.raw.setHeader("Cache-Control", "no-store");
-			}
-
 			if (!nearestError?.paths?.[boundaryKey]) {
-				res.status(500);
-				res.raw.end();
-				return;
+				res.status(isHtmxReq ? 200 : 500);
+				return isHtmxReq ? res.html("") : res.raw.end();
 			}
 
 			const html = mutor.renderFile(nearestError.paths[boundaryKey], {
 				error: err,
-				pathname,
-			});
-
-			res.status(500).html(html);
-			return;
-		}
-
-		//******** Loaders and Middleware ran successully up to this point ********
-
-		if (isHtmxReq) {
-			const fragmentPath = routesMap[match.route].fragment;
-
-			if (!fragmentPath) {
-				res.status(200);
-				res.raw.end();
-				return;
-			}
-
-			const html = mutor.renderFile(fragmentPath, {
-				data,
-				isHtmxReq,
 				url: pathname,
 			});
 
-			// Prevent caching of fragments
-			res.raw.setHeader("Cache-Control", "no-store");
-			res.raw.setHeader("Vary", "HX-Request");
-			res.status(200).html(html);
-			return;
+			return res.status(isHtmxReq ? 200 : 500).html(html);
 		}
-
-		const pagePath = routesMap[match.route].page;
-
-		if (!pagePath) {
-			res.raw.end();
-			return;
-		}
-
-		const html = mutor.renderFile(pagePath, {
-			data,
-			url: pathname,
-		});
-
-		res.status(200).html(html);
 	};
 }

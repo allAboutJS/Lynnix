@@ -42,21 +42,17 @@ export function handleHttpError({
 		routesMap,
 	);
 
-	// Prevent caching for HTMX requests
-	if (isHtmxReq) {
-		res.raw.setHeader("Vary", "HX-Request");
-		res.raw.setHeader("Cache-Control", "no-store");
-	}
-
 	if (!nearestError?.paths?.[boundary]) {
-		return res.status(code).html("");
+		// Always return a 200 status for HTMX requests
+		return res.status(isHtmxReq ? 200 : code).html("");
 	}
 
 	const html = mutor.renderFile(nearestError.paths[boundary], {
 		error,
 		data: data || {},
-		pathname,
+		url: pathname,
 	});
 
-	return res.status(code).html(html);
+	// Always return a 200 status for HTMX requests
+	return res.status(isHtmxReq ? 200 : code).html(html);
 }
