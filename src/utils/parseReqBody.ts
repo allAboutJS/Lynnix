@@ -386,12 +386,7 @@ async function loadBusboy() {
 	if (!busboyConstructorPromise) {
 		busboyConstructorPromise = import("@fastify/busboy")
 			.then((mod) => mod.default as unknown as BusboyConstructor)
-			.catch(() => {
-				console.log(
-					`[Lynnix] Parsing form requests requires the optional peer dependency "@fastify/busboy"`,
-				);
-				return null;
-			});
+			.catch(() => null);
 	}
 
 	return busboyConstructorPromise;
