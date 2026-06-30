@@ -1,6 +1,6 @@
 {
 	"name": "lynnix",
-	"version": "0.0.4",
+	"version": "0.0.5",
 	"description": "File-based hypermedia routing middleware for Node.js and HTMX",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -26,7 +26,10 @@
 	"private": false,
 	"type": "module",
 	"dependencies": {
-		"mutorjs": "^3.0.2"
+		"@fastify/busboy": "^3.2.0",
+		"cookie": "^2.0.0",
+		"mutorjs": "^3.0.2",
+		"qs": "^6.15.3"
 	},
 	"peerDependencies": {
 		"@fastify/busboy": "^3.2.0",

@@ -7,9 +7,9 @@
  * @license MIT
  */
 
+import Mutor, { type PartialMutorConfig } from "mutorjs/server";
 import type * as http from "node:http";
 import { pathToFileURL } from "node:url";
-import Mutor, { type PartialMutorConfig } from "mutorjs/server";
 import type { ParseReqBodyOptions } from "./types.js";
 import augmentRequest from "./utils/augmentRequest.js";
 import augmentResponse from "./utils/augmentResponse.js";
@@ -130,7 +130,7 @@ export default async function createLynnixApp(
 			let data: unknown;
 
 			req.params = match.params;
-			await parseReqBody(req, res, bodyParserOptions);
+			await parseReqBody(req, bodyParserOptions);
 
 			await runMiddlewares(req, res, match.route, routesMap);
 

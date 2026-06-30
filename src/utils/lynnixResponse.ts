@@ -8,34 +8,23 @@
  */
 
 import type * as http from "node:http";
+import * as cookie from "cookie";
 import type { CookieOptions, Cookies, LynnixServerResponse } from "../types.js";
 
-type CookieModule = {
-	serialize(name: string, value: string, options?: CookieOptions): string;
-	parseSetCookie(cookieHeader: string): { name: string; value: string };
-};
-
 export default class LynnixResponse implements LynnixServerResponse {
-	cookies: Cookies;
+	cookies: Cookies = {};
 
 	constructor(
 		public readonly raw: http.ServerResponse<http.IncomingMessage>,
 		private readonly isHtmx: boolean,
-		private readonly cookieModule: CookieModule | null,
-		cookies: Cookies = {},
-	) {
-		this.cookies = cookies;
-	}
+	) {}
 
 	setCookie(name: string, value: string, options: CookieOptions): void {
-		if (!this.cookieModule) {
-			console.error(
-				'[Lynnix] Setting cookies requires the optional peer dependency "cookie"',
-			);
-			return;
-		}
-
-		const serializedCookie = this.cookieModule.serialize(name, value, options);
+		const serializedCookie = cookie.stringifySetCookie({
+			name,
+			value,
+			...options,
+		});
 		const existingCookies = this.normalizeSetCookieHeader(
 			this.raw.getHeader("Set-Cookie"),
 		).filter((cookie) => this.getSetCookieName(cookie) !== name);
@@ -46,18 +35,13 @@ export default class LynnixResponse implements LynnixServerResponse {
 	}
 
 	deleteCookie(name: string): void {
-		if (!this.cookieModule) {
-			console.error(
-				'[Lynnix] Deleting cookies requires the optional peer dependency "cookie"',
-			);
-			return;
-		}
-
 		const existingCookies = this.normalizeSetCookieHeader(
 			this.raw.getHeader("Set-Cookie"),
 		).filter((cookie) => this.getSetCookieName(cookie) !== name);
 
-		const expiredCookie = this.cookieModule.serialize(name, "", {
+		const expiredCookie = cookie.stringifySetCookie({
+			name,
+			value: "",
 			maxAge: 0,
 			path: "/",
 		});
@@ -210,12 +194,8 @@ export default class LynnixResponse implements LynnixServerResponse {
 	}
 
 	private getSetCookieName(cookieHeader: string) {
-		if (!this.cookieModule) {
-			return "";
-		}
-
 		try {
-			return this.cookieModule.parseSetCookie(cookieHeader).name;
+			return cookie.parseSetCookie(cookieHeader).name;
 		} catch {
 			return "";
 		}
@@ -225,5 +205,3 @@ export default class LynnixResponse implements LynnixServerResponse {
 		this.raw.end(value);
 	}
 }
-
-export type { CookieModule };

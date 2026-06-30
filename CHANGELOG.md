@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.5] - 2026-06-30
+
+### Changed
+- `qs` and `cookie` are now bundled dependencies instead of peer dependencies.
+- `req.cookies` now correctly reads from the `Cookie` request header instead of `Set-Cookie`.
+- JSON bodies are now capped at 1MB by default. Pass `bodyLimit` in `bodyParserOptions` to override.
+- Empty JSON bodies no longer throw a parse error and instead resolve to `{}`.
+
 ## [0.0.4] - 2026-06-28
 
 ### Added

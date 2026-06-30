@@ -24,16 +24,16 @@
  * - dynamic imports for optional peer dependencies like `@fastify/busboy` and `qs`
  */
 
+import qs from "qs";
 import type {
 	BusboyConstructor,
 	BusboyFileStream,
 	LynnixServerRequest,
-	LynnixServerResponse,
 	ParsedRequestBody,
 	ParsedUploadedFile,
 	ParseReqBodyOptions,
-	QsModule,
 } from "../types.js";
+import { HttpError } from "./error.js";
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024;
 const DEFAULT_FILE_SIZE_LIMIT = 10 * 1024 * 1024;
@@ -41,23 +41,18 @@ const DEFAULT_FILE_COUNT_LIMIT = 10;
 const DEFAULT_FIELD_COUNT_LIMIT = 100;
 const DEFAULT_PART_COUNT_LIMIT = 110;
 
-let bodyParserJsonPromise: Promise<JsonBodyParserMiddlewareFactory> | null =
-	null;
 let busboyConstructorPromise: Promise<BusboyConstructor> | null = null;
-let qsModulePromise: Promise<QsModule | null> | null = null;
 
 export default async function parseReqBody(
 	req: LynnixServerRequest,
-	res: LynnixServerResponse,
 	options: ParseReqBodyOptions = {},
-): Promise<ParsedRequestBody> {
+) {
 	const rawReq = req.raw;
 
 	if (!rawReq.method || ["GET", "HEAD"].includes(rawReq.method.toUpperCase())) {
-		const result = { body: {}, files: {} };
-		req.body = result.body;
-		req.files = result.files;
-		return result;
+		req.body = {};
+		req.files = {};
+		return;
 	}
 
 	const contentType = getHeaderValue(
@@ -65,31 +60,27 @@ export default async function parseReqBody(
 	).toLowerCase();
 
 	if (!contentType) {
-		const result = { body: {}, files: {} };
-		req.body = result.body;
-		req.files = result.files;
+		req.body = {};
+		req.files = {};
 		return;
 	}
 
 	if (contentType.includes("application/json")) {
-		const result = await parseJsonRequestBody(req, res, options);
+		const raw = await bufferReqBody(req, options);
 
-		if (result) {
-			req.body = result.body as Record<string, unknown>;
-			req.files = result.files;
+		try {
+			req.body = raw.trim().length ? JSON.parse(raw) : {};
+		} catch {
+			throw new HttpError(400, "Invalid JSON body");
 		}
 
+		req.files = {};
 		return;
 	}
 
 	if (contentType.includes("application/x-www-form-urlencoded")) {
-		const result = await parseUrlEncodedBody(req, options);
-
-		if (result) {
-			req.body = result.body as Record<string, unknown>;
-			req.files = result.files;
-		}
-
+		req.body = qs.parse(await bufferReqBody(req, options), options.qsOptions);
+		req.files = {};
 		return;
 	}
 
@@ -104,151 +95,54 @@ export default async function parseReqBody(
 		return;
 	}
 
-	const result = { body: {}, files: {} };
-	req.body = result.body;
-	req.files = result.files;
-	return result;
+	req.body = {};
+	req.files = {};
 }
 
-type JsonBodyParserMiddlewareFactory = (options?: {
-	limit?: number | string;
-}) => (
-	req: LynnixServerRequest["raw"] & { body?: unknown },
-	res: LynnixServerResponse["raw"],
-	next: (error?: unknown) => void,
-) => void;
-
-async function parseJsonRequestBody(
-	req: LynnixServerRequest,
-	res: LynnixServerResponse,
-	options: ParseReqBodyOptions,
-): Promise<ParsedRequestBody> {
-	const createJsonParser = await loadJsonBodyParser();
-
-	// Return early if the JSON parser is not available
-	if (!createJsonParser) {
-		console.error(
-			`[Lynnix] Parsing JSON requests requires the optional peer dependency "body-parser"`,
-		);
-		return;
-	}
-
-	const jsonParser = createJsonParser({
-		limit: options.jsonLimit ?? options.bodyLimit ?? DEFAULT_BODY_LIMIT,
-	});
-	const rawReq = req.raw as LynnixServerRequest["raw"] & { body?: unknown };
-
-	await new Promise<void>((resolve, reject) => {
-		jsonParser(rawReq, res.raw, (error?: unknown) => {
-			if (error) {
-				reject(normalizeError(error, "Failed to parse JSON request body"));
-				return;
-			}
-
-			resolve();
-		});
-	});
-
-	return {
-		body: (rawReq.body ?? {}) as Record<string, unknown> | unknown,
-		files: {},
-	};
-}
-
-async function parseUrlEncodedBody(
+async function bufferReqBody(
 	req: LynnixServerRequest,
 	options: ParseReqBodyOptions,
-): Promise<ParsedRequestBody> {
-	const Busboy = await loadBusboy();
-	const entries: Array<[string, string]> = [];
-	const rawReq = req.raw;
-
-	// Allow URL-encoded body parsing only if Busboy is available
-	if (!Busboy) {
-		console.error(
-			`[Lynnix] Parsing URL-encoded requests requires the optional peer dependency "@fastify/busboy"`,
-		);
-		return;
-	}
+): Promise<string> {
+	const bodyLimit = options.bodyLimit ?? DEFAULT_BODY_LIMIT;
 
 	return new Promise((resolve, reject) => {
-		const busboy = new Busboy({
-			headers: rawReq.headers,
-			limits: {
-				fieldNameSize: options.fieldNameSize,
-				fieldSize: options.fieldSize ?? options.bodyLimit ?? DEFAULT_BODY_LIMIT,
-				fields: options.fields ?? DEFAULT_FIELD_COUNT_LIMIT,
-			},
-		});
+		const chunks: Buffer[] = [];
+		let receivedBytes = 0;
+		let aborted = false;
 
-		let settled = false;
+		req.raw.on("data", (chunk: Buffer) => {
+			if (aborted) return;
 
-		const fail = (error: Error) => {
-			if (settled) {
+			receivedBytes += chunk.length;
+
+			if (receivedBytes > bodyLimit) {
+				aborted = true;
+				req.raw.destroy();
+				reject(
+					new HttpError(413, `Request body size exceeds ${bodyLimit} bytes`),
+				);
 				return;
 			}
 
-			settled = true;
-			reject(error);
-		};
-
-		busboy.on(
-			"field",
-			(
-				fieldName: string,
-				value: string,
-				fieldNameTruncated: boolean,
-				valueTruncated: boolean,
-			) => {
-				if (fieldNameTruncated) {
-					fail(
-						new Error(
-							`Urlencoded field name exceeded the allowed size: ${fieldName}`,
-						),
-					);
-					return;
-				}
-
-				if (valueTruncated) {
-					fail(
-						new Error(
-							`Urlencoded field value exceeded the allowed size: ${fieldName}`,
-						),
-					);
-					return;
-				}
-
-				entries.push([fieldName, value]);
-			},
-		);
-
-		busboy.on("fieldsLimit", () => {
-			fail(new Error("Urlencoded request exceeded the configured field limit"));
+			chunks.push(chunk);
 		});
 
-		busboy.on("partsLimit", () => {
-			fail(new Error("Urlencoded request exceeded the configured parts limit"));
-		});
+		req.raw.on("end", () => {
+			if (aborted) return;
 
-		busboy.on("error", (error) => {
-			fail(normalizeError(error, "Failed to parse urlencoded request body"));
-		});
-
-		busboy.on("finish", async () => {
-			if (settled) {
-				return;
+			if (chunks.length === 0) {
+				return resolve("");
 			}
 
-			try {
-				const body = await parseUrlEncodedEntries(entries, options);
-				settled = true;
-				resolve({ body, files: {} });
-			} catch (error) {
-				fail(normalizeError(error, "Failed to parse urlencoded request body"));
-			}
+			resolve(Buffer.concat(chunks).toString("utf-8"));
 		});
 
-		rawReq.pipe(busboy as unknown as NodeJS.WritableStream);
+		req.raw.on("error", (err) => {
+			if (!aborted) {
+				aborted = true;
+				reject(err);
+			}
+		});
 	});
 }
 
@@ -262,7 +156,7 @@ async function parseMultipartBody(
 		console.error(
 			`[Lynnix] Parsing multipart requests requires the optional peer dependency "@fastify/busboy"`,
 		);
-		return;
+		return { body: {}, files: {} };
 	}
 
 	const body: Record<string, unknown> = {};
@@ -488,51 +382,6 @@ async function consumeFileStream(
 	});
 }
 
-async function parseUrlEncodedEntries(
-	entries: Array<[string, string]>,
-	options: ParseReqBodyOptions,
-) {
-	if (!entries.length) {
-		return {};
-	}
-
-	const queryString = entries
-		.map(
-			([key, value]) =>
-				`${encodeURIComponent(key)}=${encodeURIComponent(value)}`,
-		)
-		.join("&");
-	const qsModule = await loadQsModule();
-
-	if (qsModule) {
-		return qsModule.parse(queryString, options.qsOptions);
-	}
-
-	const fallback: Record<string, unknown> = {};
-
-	for (let i = 0; i < entries.length; i++) {
-		const [key, value] = entries[i];
-		appendValue(fallback, key, value);
-	}
-
-	return fallback;
-}
-
-async function loadJsonBodyParser() {
-	if (!bodyParserJsonPromise) {
-		bodyParserJsonPromise = import("body-parser")
-			.then((mod) => mod.default.json.bind(mod.default))
-			.catch(() => {
-				console.log(
-					`[Lynnix] Parsing JSON requests requires the optional peer dependency "body-parser"`,
-				);
-				return null;
-			});
-	}
-
-	return bodyParserJsonPromise;
-}
-
 async function loadBusboy() {
 	if (!busboyConstructorPromise) {
 		busboyConstructorPromise = import("@fastify/busboy")
@@ -546,21 +395,6 @@ async function loadBusboy() {
 	}
 
 	return busboyConstructorPromise;
-}
-
-async function loadQsModule() {
-	if (!qsModulePromise) {
-		qsModulePromise = import("qs")
-			.then((mod) => ({ parse: mod.default.parse.bind(mod.default) }))
-			.catch(() => {
-				console.log(
-					`[Lynnix] Parsing search queries requires the optional peer dependency "qs"`,
-				);
-				return null;
-			});
-	}
-
-	return qsModulePromise;
 }
 
 function appendValue(
