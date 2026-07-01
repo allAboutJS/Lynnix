@@ -307,9 +307,9 @@ math-intrinsics@^1.1.0:
   integrity sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==
 
 mutorjs@^3.0.2:
-  version "3.0.2"
-  resolved "https://registry.yarnpkg.com/mutorjs/-/mutorjs-3.0.2.tgz#099d3fa01e9bff386d7d1689669364075165f231"
-  integrity sha512-25RpkT/nvJMJyl2Ud6T2p1bGdzVsZWfQXTLZCYzGJEVjRvAGI+BCW114XpwgKdfCz+seWicLPEhTDjL6O9P5Hg==
+  version "3.0.6"
+  resolved "https://registry.yarnpkg.com/mutorjs/-/mutorjs-3.0.6.tgz#126875ee027ca4bc61d8565bc97da6ed986ee4d6"
+  integrity sha512-2I0LEEJqxYKxHjDxD9o5druoJfliBWViovypfQjhbWdyXDzjRCx2xAQ3ufjT9sBZYzK42d6acZXVS4EOUVVdVg==
 
 object-inspect@^1.13.3, object-inspect@^1.13.4:
   version "1.13.4"

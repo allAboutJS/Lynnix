@@ -26,28 +26,15 @@
 	"private": false,
 	"type": "module",
 	"dependencies": {
-		"@fastify/busboy": "^3.2.0",
 		"cookie": "^2.0.0",
 		"mutorjs": "^3.0.2",
 		"qs": "^6.15.3"
 	},
 	"peerDependencies": {
-		"@fastify/busboy": "^3.2.0",
-		"body-parser": "^2.3.0",
-		"cookie": "^1.1.1",
-		"qs": "^6.15.2"
+		"@fastify/busboy": "^3.2.0"
 	},
 	"peerDependenciesMeta": {
 		"@fastify/busboy": {
-			"optional": true
-		},
-		"body-parser": {
-			"optional": true
-		},
-		"cookie": {
-			"optional": true
-		},
-		"qs": {
 			"optional": true
 		}
 	},
